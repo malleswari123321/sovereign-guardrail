@@ -1,0 +1,5 @@
+{
+  "action": "provision_resource",
+  "data_classification": "RESTRICTED_PII",
+  "target_region": "us-west-2"
+}
