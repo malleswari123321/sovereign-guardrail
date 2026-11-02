@@ -2,60 +2,72 @@ package main
 
 import (
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/vishvananda/netlink"
 )
 
 func main() {
-	// Remove resource limits for eBPF loading
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Fatalf("Failed to remove memlock limit: %v", err)
 	}
 
-	// Load pre-compiled eBPF object file into a collection spec
 	spec, err := ebpf.LoadCollectionSpec("egress_guardrail.o")
 	if err != nil {
 		log.Fatalf("Failed to load eBPF collection spec: %v", err)
 	}
 
 	var objs struct {
-		Prog           *ebpf.Program `ebpf:"enforce_sovereign_boundary"`
-		SovereignIpMap *ebpf.Map     `ebpf:"sovereign_ip_map"`
+		Prog *ebpf.Program `ebpf:"enforce_sovereign_boundary"`
 	}
 
 	if err := spec.LoadAndAssign(&objs, nil); err != nil {
 		log.Fatalf("Failed to load eBPF objects into kernel: %v", err)
 	}
 	defer objs.Prog.Close()
-	defer objs.SovereignIpMap.Close()
 
-	log.Println("[INFO] Sovereign eBPF guardrail successfully loaded into Linux kernel!")
+	log.Println("[INFO] Sovereign eBPF bitwise guardrail compiled & loaded!")
 
-	// Populate sovereign IP map with an approved IP (e.g., 192.168.1.100 = 1 approved)
-	approvedIP := binaryIP("192.168.1.100")
-	var approvedVal uint8 = 1
-	if err := objs.SovereignIpMap.Put(&approvedIP, &approvedVal); err != nil {
-		log.Fatalf("Failed to update sovereign IP map: %v", err)
+	link, err := netlink.LinkByName("eth0")
+	if err != nil {
+		log.Fatalf("Failed to get eth0 interface: %v", err)
 	}
-	log.Printf("[INFO] Whitelisted sovereign IP 192.168.1.100 in kernel map.")
 
-	// Wait for termination signal to keep eBPF program attached
+	qdisc := &netlink.GenericQdisc{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: link.Attrs().Index,
+			Handle:    netlink.MakeHandle(0xffff, 0),
+			Parent:    netlink.HANDLE_CLSACT,
+		},
+		QdiscType: "clsact",
+	}
+	_ = netlink.QdiscReplace(qdisc)
+
+	filter := &netlink.BpfFilter{
+		FilterAttrs: netlink.FilterAttrs{
+			LinkIndex: link.Attrs().Index,
+			Parent:    netlink.HANDLE_MIN_EGRESS,
+			Handle:    1,
+			Protocol:  syscall.ETH_P_ALL,
+		},
+		Fd:           objs.Prog.FD(),
+		Name:         "sovereign_guardrail",
+		DirectAction: true,
+	}
+	if err := netlink.FilterReplace(filter); err != nil {
+		log.Fatalf("Failed to attach TC filter: %v", err)
+	}
+
+	log.Println("🚀 Bitwise Sovereign Guardrail ACTIVE on eth0 egress! Press Ctrl+C to stop.")
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("[INFO] Unloading Sovereign eBPF guardrail...")
+	netlink.FilterDel(filter)
+	log.Println("[INFO] Unloaded eBPF filter from network interface.")
 }
-
-// Convert string IP to big-endian uint32 for eBPF key lookup
-func binaryIP(ipStr string) uint32 {
-	ip := net.ParseIP(ipStr).To4()
-	return uint32(ip[0]) | uint32(ip[1])<<8 | uint32(ip[2])<<16 | uint32(ip[3])<<24
-}
-
-

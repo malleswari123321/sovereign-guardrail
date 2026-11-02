@@ -1,43 +1,46 @@
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
-#include <linux/pkt_cls.h>  // <-- Add this line for TC_ACT_OK and TC_ACT_SHOT
+#include <linux/in.h>
+#include <linux/pkt_cls.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 
-// BPF map containing approved sovereign destination CIDRs / Subnet IPs
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u32);   // Destination IPv4 address
-    __type(value, __u8);  // 1 = Approved, 0 = Blocked
-} sovereign_ip_map SEC(".maps");
-
-SEC("tc_egress")
-int enforce_sovereign_boundary(struct __sk_buff *skb) {
-    void *data = (void *)(long)skb->data;
-    void *data_end = (void *)(long)skb->data_end;
+SEC("classifier")
+int enforce_sovereign_boundary(struct __sk_buff *ctx) {
+    void *data = (void *)(long)ctx->data;
+    void *data_end = (void *)(long)ctx->data_end;
 
     struct ethhdr *eth = data;
     if ((void *)(eth + 1) > data_end)
         return TC_ACT_OK;
 
-    if (eth->h_proto != __constant_htons(ETH_P_IP))
+    if (eth->h_proto != bpf_htons(ETH_P_IP))
         return TC_ACT_OK;
 
-    struct iphdr *ip = (void *)(eth + 1);
-    if ((void *)(ip + 1) > data_end)
+    struct iphdr *iph = (void *)(eth + 1);
+    if ((void *)(iph + 1) > data_end)
         return TC_ACT_OK;
 
-    __u32 dest_ip = ip->daddr;
-    __u8 *is_approved = bpf_map_lookup_elem(&sovereign_ip_map, &dest_ip);
+    __u32 dest_ip = iph->daddr; // Already in network byte order
 
-    // If destination IP is not in sovereign map, drop packet at kernel layer
-    if (!is_approved || *is_approved == 0) {
-        bpf_printk("[SOVEREIGN VIOLATION] Dropped egress packet to foreign IP: %x\n", dest_ip);
-        return TC_ACT_SHOT; // Drop packet immediately
+    // Convert network byte order to host byte order for bitwise checks
+    __u32 host_ip = bpf_ntohl(dest_ip);
+
+    // 1. Allow AWS Mumbai Subnet: 3.5.0.0/16 
+    // Network mask for /16 is 0xFFFF0000. Base network: 3.5.0.0 -> 0x03050000
+    if ((host_ip & 0xFFFF0000) == 0x03050000) {
+        return TC_ACT_OK; // PASS Mumbai
     }
 
-    return TC_ACT_OK; // Allow packet
+    // 2. Allow AWS Mumbai Edge Subnet: 52.219.0.0/16
+    // Base network: 52.219.0.0 -> 0x34DB0000
+    if ((host_ip & 0xFFFF0000) == 0x34DB0000) {
+        return TC_ACT_OK; // PASS Mumbai Edge
+    }
+
+    // Default Policy: DROP unauthorized egress (e.g. US-East 16.x.x.x, 52.217.x.x)
+    return TC_ACT_SHOT; 
 }
 
 char _license[] SEC("license") = "GPL";
