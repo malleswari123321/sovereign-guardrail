@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sovereign Multi-Cloud Data Boundary & Cross-Border Residency Guardrail | Malleswari D</title>
+<meta name="description" content="Kernel-level egress guardrail (eBPF + Go) that blocks traffic to non-approved cloud regions, validated on live AWS S3.">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;500;600;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Palette from reference: deep slate base, raised cards, soft borders, blue focus, aqua/green/violet swatches */
+:root{--bg:#0d1219;--band:#111823;--card:#161d29;--card2:#1b2331;--line:#283142;--text:#e8ebf1;--mute:#8d96a7;--blue:#5b8def;--aqua:#6fe0d4;--green:#8fdc9a;--violet:#8b79c9;--red:#f2788a;--code:#0a0f16}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.65 "DM Sans",system-ui,sans-serif}
+.wrap{max-width:780px;margin:0 auto;padding:0 22px}
+header{padding:14px 0;border-bottom:1px solid var(--line);background:var(--band)}
+header .wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.logo{font-weight:700;font-size:1.15rem;color:var(--text);text-decoration:none}
+nav a{color:var(--mute);text-decoration:none;margin-left:6px;padding:6px 14px;border-radius:999px;font-size:.95rem}
+nav a:hover{background:var(--card2);color:var(--text)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.hero{display:flex;justify-content:space-between;align-items:center;gap:28px;padding:52px 0 18px}
+.hero h1{font-size:clamp(2rem,6vw,3rem);margin:0 0 10px;line-height:1.08;letter-spacing:-.03em;font-weight:700}
+.hero p{margin:0 0 6px;color:var(--mute);max-width:44ch;font-size:1.08rem}
+.hero .loc{color:var(--text)}
+.avatar{flex:none;width:128px;height:128px;border-radius:50%;background:var(--card2);border:3px solid var(--blue);box-shadow:0 0 0 6px rgba(91,141,239,.15);display:grid;place-items:center;font:700 2rem "DM Sans";color:var(--aqua);overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.links{display:flex;gap:10px;margin-top:20px;align-items:center;flex-wrap:wrap}
+.cta{display:inline-block;background:var(--blue);color:#fff;font-weight:600;text-decoration:none;padding:10px 22px;border-radius:999px;transition:background .15s}
+.cta:hover{background:#7aa3f5}
+.ico{width:44px;height:44px;background:var(--card);border:1px solid var(--line);border-radius:50%;display:grid;place-items:center;color:var(--text)}
+.ico:hover{border-color:var(--aqua);color:var(--aqua)}
+.ico svg{width:20px;height:20px;fill:currentColor}
+.swatch{display:flex;height:34px;border-radius:10px;overflow:hidden;border:1px solid var(--line);margin:10px 0 0}
+.swatch i{flex:1}
+.swatch i:nth-child(1){background:#2a9d9a}.swatch i:nth-child(2){background:#0e3b3f}.swatch i:nth-child(3){background:#a7efe3}.swatch i:nth-child(4){background:#6fe0d4}.swatch i:nth-child(5){background:#8fdc9a}.swatch i:nth-child(6){background:#8b79c9}
+h2.sec{font-size:.85rem;color:var(--mute);letter-spacing:.09em;text-transform:uppercase;margin:60px 0 16px;font-weight:700}
+h2.sec.first{margin-top:40px}
+h1.proj{font-size:clamp(1.4rem,4vw,1.85rem);line-height:1.25;margin:0 0 12px;letter-spacing:-.02em;font-weight:700}
+p{margin:0 0 14px;max-width:66ch}
+.mute{color:var(--mute)}
+a.link{color:var(--aqua);font-weight:600}
+code{font:.88em "Ubuntu Mono",monospace;background:var(--card2);border:1px solid var(--line);padding:1px 7px;border-radius:6px;color:var(--aqua)}
+ul{padding-left:20px;margin:0 0 14px}li{margin-bottom:8px;max-width:66ch}
+li::marker{color:var(--blue)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
+.demo h3{margin:0 0 4px;font-size:1.2rem;font-weight:700}
+.demo p{font-size:.95rem;color:var(--mute)}
+.lane{position:relative;height:150px;margin:12px 0}
+.node{position:absolute;font:.82rem/1.3 "Ubuntu Mono",monospace;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:6px 10px;text-align:center}
+#host{left:0;top:56px}
+#hook{left:41%;top:56px;border:1px dashed var(--blue);color:var(--blue)}
+#mum{right:0;top:6px;border-color:var(--aqua);color:var(--aqua)}
+#use{right:0;top:106px;border-color:var(--red);color:var(--red)}
+.rail{position:absolute;height:0;border-top:2px dashed var(--line);left:60px;right:90px;top:75px}
+#pkt{position:absolute;left:62px;top:67px;width:14px;height:14px;border-radius:50%;background:var(--blue);opacity:0;transition:left .55s ease-in,top .55s ease-in,opacity .2s}
+.controls{display:flex;gap:10px;flex-wrap:wrap}
+.btn{cursor:pointer;font:600 .95rem "DM Sans",sans-serif;padding:9px 18px;border-radius:999px;border:1px solid var(--aqua);background:rgba(111,224,212,.12);color:var(--aqua)}
+.btn.drop{border-color:var(--red);background:rgba(242,120,138,.12);color:var(--red)}
+.btn.alt{background:transparent;border-color:var(--line);color:var(--mute)}
+.btn:hover:not(:disabled){filter:brightness(1.25)}
+.btn:disabled{opacity:.5;cursor:wait}
+.out{font:.92rem/1.6 "Ubuntu Mono",monospace;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:16px;min-height:5.6em;white-space:pre-wrap}
+.ok{color:var(--aqua)}.bad{color:var(--red)}
+.counter{font:.92rem "Ubuntu Mono",monospace;margin-top:12px;color:var(--mute)}
+.counter span{color:var(--red);font-weight:700}
+pre{background:var(--code);border:1px solid var(--line);color:#d6dfec;font:.9rem/1.6 "Ubuntu Mono",monospace;padding:16px 18px;border-radius:12px;overflow-x:auto;margin:10px 0 18px}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.shots img{width:100%;border:1px solid var(--line);border-radius:12px;display:block}
+.grid{display:flex;flex-wrap:wrap;gap:10px}
+.tech{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:6px 16px 6px 6px;font-size:.95rem}
+.tech b{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;font:700 .72rem "DM Sans";color:#0d1219}
+.tech:nth-child(1) b{background:#6fe0d4}.tech:nth-child(2) b{background:#5b8def}.tech:nth-child(3) b{background:#a7efe3}.tech:nth-child(4) b{background:#8fdc9a}.tech:nth-child(5) b{background:#8b79c9}.tech:nth-child(6) b{background:#2a9d9a}
+.connect{text-align:center;background:linear-gradient(160deg,#16243a,#161d29);border:1px solid var(--line);border-radius:16px;padding:34px 22px}
+.connect p{margin:0 auto 18px;color:var(--mute)}
+.mailline{margin:18px auto 0!important;font-size:.95rem}.mailline b{color:var(--text)}.mailline .btn{padding:4px 14px;margin-left:6px}
+footer{padding:48px 0 40px;text-align:center;color:var(--mute);font-size:.9rem}
+@media (max-width:600px){.hero{flex-direction:column-reverse;align-items:flex-start}.shots{grid-template-columns:1fr}.node{font-size:.7rem}#hook{left:38%}nav a{margin-left:0;padding:6px 9px}}
+@media (prefers-reduced-motion:reduce){#pkt,.cta{transition:none}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <a class="logo" href="#top">Malleswari D</a>
+  <nav aria-label="Page"><a href="#project">Project</a><a href="#proof">Proof</a><a href="#stack">Stack</a><a href="#contact">Contact</a></nav>
+</div></header>
+
+<main class="wrap" id="top">
+<section class="hero">
+  <div>
+    <h1>Hi, I'm Malleswari D</h1>
+    <p>AI software developer, now building close to the kernel.</p>
+    <p class="loc">Chennai, India</p>
+    <div class="links">
+      <a class="cta" href="https://mail.google.com/mail/?view=cm&fs=1&to=malleswarimadhu057@gmail.com&su=Hello%20Malleswari" target="_blank" rel="noopener">Email me</a>
+      <a class="ico" href="https://github.com/malleswari123321" aria-label="GitHub"><svg viewBox="0 0 24 24"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+      <a class="ico" href="https://linkedin.com/in/malleswari-d-5096682b1" aria-label="LinkedIn"><svg viewBox="0 0 24 24"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg></a>
+    </div>
+  </div>
+  <div class="avatar"><img src="profile.jpg" alt="Malleswari D" onerror="this.replaceWith('MD')"></div>
+</section>
+<div class="swatch" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+<h2 class="sec first" id="project">Featured project</h2>
+<h1 class="proj">Sovereign Multi-Cloud Data Boundary &amp; Cross-Border Residency Guardrail</h1>
+<p class="mute">A Linux kernel filter that lets a server talk to approved cloud regions and silently drops traffic to everywhere else. Tested against live AWS S3 buckets in Mumbai and N. Virginia.</p>
+<p><a class="link" href="https://github.com/malleswari123321/sovereign-guardrail">View source on GitHub</a></p>
+
+<section class="card demo" aria-labelledby="dt">
+  <h3 id="dt">Try the guardrail</h3>
+  <p>A simulation of the two live tests. Send a packet and watch what the kernel hook does.</p>
+  <div class="lane" aria-hidden="true">
+    <div class="rail"></div>
+    <div class="node" id="host">Host<br>app</div>
+    <div class="node" id="hook">eBPF hook<br>eth0 egress</div>
+    <div class="node" id="mum">Mumbai S3<br>ap-south-1</div>
+    <div class="node" id="use">N. Virginia S3<br>us-east-1</div>
+    <div id="pkt"></div>
+  </div>
+  <div class="controls">
+    <button class="btn" id="b1">Send to Mumbai</button>
+    <button class="btn drop" id="b2">Send to N. Virginia</button>
+    <button class="btn alt" id="b3">Reset</button>
+  </div>
+  <div class="out" id="out" role="status" aria-live="polite">Waiting for a packet.</div>
+  <div class="counter">drop_counter = <span id="cnt">0</span></div>
+</section>
+
+<h2 class="sec">How it works</h2>
+<p>Companies and regulators often require that data stays inside certain regions. Firewalls usually enforce that in userspace, where an application can route around them. This guardrail runs inside the Linux kernel instead, so no application on the host can skip it.</p>
+<ul>
+  <li>A C program is attached to the egress hook of <code>eth0</code> through Traffic Control (<code>clsact</code>).</li>
+  <li>For each outgoing packet it reads the destination IPv4 address and compares it with an allowlist of Mumbai S3 ranges.</li>
+  <li>A match returns <code>TC_ACT_OK</code> and the packet leaves. No match returns <code>TC_ACT_SHOT</code>, the packet is dropped, and a counter in a BPF map goes up.</li>
+  <li>A Go program loads the compiled object, attaches the hook, and prints the drop counter.</li>
+</ul>
+
+<h2 class="sec" id="proof">Proof it works</h2>
+<p>A timed-out connection alone could be a network fault. To rule that out, the kernel program counts its own drops, and the Go loader reads the counter while the test runs.</p>
+<pre>Kernel Drop Counter (TC_ACT_SHOT): 1 packets dropped
+
+[TEST] AWS Mumbai (ap-south-1)    3.5.209.20:443
+       <span class="ok">SUCCESS: traffic routed cleanly to sovereign AWS zone</span>
+[TEST] AWS US-East (us-east-1)    16.15.171.47:443
+       <span class="bad">KERNEL DROP: egress packet dropped by eBPF (TC_ACT_SHOT)</span></pre>
+<div class="shots">
+  <img src="docs/s3-buckets.png" alt="AWS console showing two S3 buckets, one in Mumbai and one in N. Virginia" onerror="this.style.display='none'">
+  <img src="docs/test-output.png" alt="Terminal output with the Mumbai connection allowed and the US-East connection dropped" onerror="this.style.display='none'">
+</div>
+
+<h2 class="sec">Limits and next steps</h2>
+<p>This is a proof of concept, and here is what it does not do.</p>
+<ul>
+  <li>IPv4 only, egress only, and one interface (<code>eth0</code>).</li>
+  <li>The allowlist is hardcoded. Cloud IP ranges change, so the next step is pulling AWS <code>ip-ranges.json</code>, filtering for <code>ap-south-1</code>, and refreshing an <code>LPM_TRIE</code> map on a timer.</li>
+  <li>No throughput or latency benchmarks yet, so I make no performance claims.</li>
+</ul>
+<p class="mute">Tested on WSL2 (Ubuntu 22.04, kernel 5.15), Go 1.21.5, clang 14.</p>
+
+<h2 class="sec" id="stack">Technologies</h2>
+<div class="grid">
+  <div class="tech"><b>eBPF</b>eBPF</div>
+  <div class="tech"><b>C</b>C</div>
+  <div class="tech"><b>Go</b>Go</div>
+  <div class="tech"><b>TC</b>Linux TC</div>
+  <div class="tech"><b>Py</b>Python</div>
+  <div class="tech"><b>S3</b>AWS S3</div>
+</div>
+
+<h2 class="sec" id="contact">Let's connect</h2>
+<div class="connect">
+  <p>Questions, proposals, or opportunities? Feel free to reach out.</p>
+  <a class="cta" href="https://mail.google.com/mail/?view=cm&fs=1&to=malleswarimadhu057@gmail.com&su=Hello%20Malleswari" target="_blank" rel="noopener">Email me</a>
+  <p class="mailline">or write to <b>malleswarimadhu057@gmail.com</b> <button class="btn alt" id="cp" type="button">Copy</button></p>
+</div>
+</main>
+<footer>© 2026 Malleswari D</footer>
+
+<script>
+(function(){
+  var pkt=document.getElementById('pkt'),out=document.getElementById('out'),cnt=document.getElementById('cnt');
+  var b1=document.getElementById('b1'),b2=document.getElementById('b2'),b3=document.getElementById('b3');
+  var drops=0,busy=false;
+  function lane(){return document.querySelector('.lane').clientWidth}
+  function reset(){pkt.style.transition='none';pkt.style.left='62px';pkt.style.top='67px';pkt.style.opacity=0;pkt.style.background='';void pkt.offsetWidth;pkt.style.transition=''}
+  function send(ok){
+    if(busy)return;busy=true;b1.disabled=b2.disabled=true;reset();
+    var w=lane(),hookX=Math.round(w*0.41)+4;
+    out.textContent=(ok?'dst 3.5.209.20:443':'dst 16.15.171.47:443')+'\nchecking allowlist...';
+    pkt.style.opacity=1;pkt.style.left=hookX+'px';
+    setTimeout(function(){
+      if(ok){
+        out.innerHTML='dst 3.5.209.20:443\nin allowed range -> <span class="ok">TC_ACT_OK</span>\n<span class="ok">SUCCESS: traffic routed cleanly to sovereign AWS zone</span>';
+        pkt.style.background='#6fe0d4';
+        pkt.style.left=(w-34)+'px';pkt.style.top='17px';
+      }else{
+        drops++;cnt.textContent=drops;
+        out.innerHTML='dst 16.15.171.47:443\nnot in allowlist -> <span class="bad">TC_ACT_SHOT</span>\n<span class="bad">KERNEL DROP: egress packet dropped by eBPF</span>';
+        pkt.style.background='#f2788a';pkt.style.opacity=0;
+      }
+      setTimeout(function(){busy=false;b1.disabled=b2.disabled=false},650);
+    },600);
+  }
+  var cp=document.getElementById('cp');cp.onclick=function(){var t='malleswarimadhu057@gmail.com';function done(){cp.textContent='Copied!';setTimeout(function(){cp.textContent='Copy'},1500)}if(navigator.clipboard){navigator.clipboard.writeText(t).then(done,done)}else{done()}};
+  b1.onclick=function(){send(true)};
+  b2.onclick=function(){send(false)};
+  b3.onclick=function(){drops=0;cnt.textContent=0;reset();out.textContent='Waiting for a packet.'};
+})();
+</script>
+</body>
+</html>
